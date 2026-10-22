@@ -82,7 +82,6 @@ function ReaderPane({ ctx }) {
     try {
       await host.request("prompt.submit", {
         session_id: sessionId,
-        submission_id: crypto.randomUUID(),
         text: "Kindle continuous reader buffer is low. Generate and append the next five screens from Co-Existence, then update the existing player. Do not repeat text.",
       });
     } catch (error) {
@@ -131,7 +130,6 @@ function ReaderPane({ ctx }) {
     setPlaying(false); setStatus("Stopped");
     if (sessionId) void host.request("prompt.submit", {
       session_id: sessionId,
-      submission_id: crypto.randomUUID(),
       text: "Stop the Kindle continuous reader now. Do not capture, transcribe, or advance any more pages.",
     });
   }
