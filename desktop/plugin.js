@@ -14,20 +14,36 @@ function parseCliJson(output) {
   throw new Error(lines.slice(-3).join(" ") || "Empty Kindle queue response");
 }
 
-async function queueCli() {
-  const routes = await host.profileRoutes();
-  const route = routes.find(r => r.primary) || routes.find(r => r.mode === "local") || routes[0];
-  if (!route) throw new Error("No Hermes profile route available");
+async function runCli(route, args) {
   const res = await host.requestProfile(
     route,
     "cli.exec",
-    { argv: ["--profile", route.targetProfile, "kindle-reader", "queue", "--json"], timeout: 30 },
+    { argv: ["--profile", route.targetProfile, "kindle-reader", ...args, "--json"], timeout: 30 },
     35_000,
   );
   if (res.blocked) throw new Error(res.hint || "cli.exec blocked");
   const payload = parseCliJson(res.output);
   if (!payload.ok) throw new Error(payload.error || "Kindle queue unavailable");
   return payload;
+}
+
+async function queueCli(knownItems) {
+  const routes = await host.profileRoutes();
+  const route = routes.find(r => r.primary) || routes.find(r => r.mode === "local") || routes[0];
+  if (!route) throw new Error("No Hermes profile route available");
+  const manifest = await runCli(route, ["queue"]);
+  const items = [];
+  for (const raw of manifest.items) {
+    const known = knownItems.get(raw.id);
+    if (known) { items.push(known); continue; }
+    const parts = [];
+    for (let part = 0; part < raw.parts; part++) {
+      const payload = await runCli(route, ["audio", "--id", raw.id, "--part", String(part)]);
+      parts.push(payload.data);
+    }
+    items.push({ id: raw.id, label: raw.label, duration: raw.duration, src: dataUrl(parts.join("")) });
+  }
+  return { ...manifest, items };
 }
 
 function dataUrl(base64) { return `data:audio/mpeg;base64,${base64}`; }
@@ -52,11 +68,8 @@ function ReaderPane() {
 
   async function refresh() {
     try {
-      const payload = await queueCli();
-      const merged = payload.items.map(raw => {
-        const known = seenRef.current.get(raw.id);
-        if (known) return known;
-        const item = { id: raw.id, label: raw.label, duration: raw.duration, src: dataUrl(raw.audio) };
+      const payload = await queueCli(seenRef.current);
+      const merged = payload.items.map(item => {
         seenRef.current.set(item.id, item);
         return item;
       });
