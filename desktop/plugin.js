@@ -14,34 +14,16 @@ function parseCliJson(output) {
   throw new Error(lines.slice(-3).join(" ") || "Empty Kindle queue response");
 }
 
-async function runCli(route, args) {
-  const res = await host.requestProfile(
-    route,
-    "cli.exec",
-    { argv: ["--profile", route.targetProfile, "kindle-reader", ...args, "--json"], timeout: 30 },
-    35_000,
-  );
-  if (res.blocked) throw new Error(res.hint || "cli.exec blocked");
-  const payload = parseCliJson(res.output);
-  if (!payload.ok) throw new Error(payload.error || "Kindle queue unavailable");
-  return payload;
-}
-
-async function queueCli(knownItems) {
-  const routes = await host.profileRoutes();
-  const route = routes.find(r => r.primary) || routes.find(r => r.mode === "local") || routes[0];
-  if (!route) throw new Error("No Hermes profile route available");
-  const manifest = await runCli(route, ["queue"]);
+async function queueApi(ctx, knownItems) {
+  const manifest = await ctx.rest("/queue", { timeoutMs: 30_000 });
+  if (!manifest?.ok) throw new Error(manifest?.error || "Kindle queue unavailable");
   const items = [];
   for (const raw of manifest.items) {
     const known = knownItems.get(raw.id);
     if (known) { items.push(known); continue; }
-    const parts = [];
-    for (let part = 0; part < raw.parts; part++) {
-      const payload = await runCli(route, ["audio", "--id", raw.id, "--part", String(part)]);
-      parts.push(payload.data);
-    }
-    items.push({ id: raw.id, label: raw.label, duration: raw.duration, src: dataUrl(parts.join("")) });
+    const payload = await ctx.rest(`/audio/${encodeURIComponent(raw.id)}`, { timeoutMs: 45_000 });
+    if (!payload?.ok || !payload.audio) throw new Error(payload?.error || `Audio unavailable: ${raw.id}`);
+    items.push({ id: raw.id, label: raw.label, duration: raw.duration, src: dataUrl(payload.audio) });
   }
   return { ...manifest, items };
 }
@@ -52,7 +34,7 @@ function fmt(value) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
-function ReaderPane() {
+function ReaderPane({ ctx }) {
   const audioRef = useRef(null);
   const seenRef = useRef(new Map());
   const requestedRef = useRef(false);
@@ -68,7 +50,7 @@ function ReaderPane() {
 
   async function refresh() {
     try {
-      const payload = await queueCli(seenRef.current);
+      const payload = await queueApi(ctx, seenRef.current);
       const merged = payload.items.map(item => {
         seenRef.current.set(item.id, item);
         return item;
@@ -172,6 +154,6 @@ export default {
   name: "Kindle Reader",
   defaultEnabled: true,
   register(ctx) {
-    ctx.register({ id: "pane", area: "panes", order: 120, title: "Kindle Reader", data: { placement: "bottom", dock: { pane: "workspace", pos: "bottom" }, height: "210px" }, render: () => jsx(ReaderPane, {}) });
+    ctx.register({ id: "pane", area: "panes", order: 120, title: "Kindle Reader", data: { placement: "bottom", dock: { pane: "workspace", pos: "bottom" }, height: "210px" }, render: () => jsx(ReaderPane, { ctx }) });
   },
 };
