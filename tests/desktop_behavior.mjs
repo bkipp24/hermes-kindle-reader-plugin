@@ -41,6 +41,8 @@ const jsx = (type, props = {}) => {
 };
 const jsxs = jsx;
 const hostRequests = [];
+const paneCalls = [];
+let paneVisible = true;
 let focusedSessionId = "session-1";
 let focusedStoredSessionId = "stored-1";
 const host = {
@@ -49,6 +51,9 @@ const host = {
     focusedStoredSessionId: { get: () => focusedStoredSessionId },
   },
   request: async (name, payload) => { hostRequests.push({ name, payload }); return {}; },
+  paneVisibility: id => ({ get: () => paneVisible && id === "kindle-reader:pane" }),
+  undismissPane: id => paneCalls.push({ action: "undismiss", id }),
+  revealPane: id => paneCalls.push({ action: "reveal", id }),
 };
 
 let activeRunner = null;
@@ -136,7 +141,7 @@ source = source
   .replace('import { useEffect, useRef, useState } from "react";', 'const { useEffect, useRef, useState } = globalThis.__mocks;')
   .replace('import { ConfirmDialog, host, useValue } from "@hermes/plugin-sdk";', 'const { ConfirmDialog, host, useValue } = globalThis.__mocks;')
   .replace("export default {", "const pluginDefault = {")
-  .concat("\nglobalThis.ReaderPane = ReaderPane;\n");
+  .concat("\nglobalThis.ReaderPane = ReaderPane; globalThis.pluginDefault = pluginDefault;\n");
 new Function(source)();
 
 const book = { id: "kindle:B001", title: "Book" };
@@ -368,6 +373,53 @@ async function stopWithoutFocusedSession() {
   assert.equal(hostRequests.length, 0, "session interruption is optional without a controller");
 }
 
+async function paneToggle() {
+  const contributions = [];
+  const ctx = { register: contribution => {
+    assert.equal(Array.isArray(contribution), false, "ctx.register accepts one contribution");
+    contributions.push(contribution);
+    return () => undefined;
+  } };
+  globalThis.pluginDefault.register(ctx);
+  const pane = contributions.find(value => value.area === "panes");
+  const toggle = contributions.find(value => value.area === "statusBar.right");
+  assert.equal(pane.data.lifecycleKeepAlive, true, "hidden playback must remain mounted");
+  assert.equal(pane.data.placement, "main", "a lone reader needs the native tab strip close affordance");
+  assert.deepEqual(pane.data.dock, { pane: "workspace", pos: "bottom" });
+  assert.ok(toggle, "status bar toggle must be registered");
+
+  let closeClicks = 0;
+  globalThis.document = {
+    querySelector: selector => {
+      assert.equal(selector, '[data-tree-tab="kindle-reader:pane"]');
+      return { querySelector: () => ({ click: () => { closeClicks += 1; } }) };
+    },
+  };
+  paneVisible = true;
+  let tree = toggle.render();
+  if (typeof tree.type === "function") tree = tree.type(tree.props);
+  assert.equal(tree.props["aria-label"], "Hide Kindle Reader");
+  tree.props.onClick();
+  assert.equal(closeClicks, 1, "visible pane must use the native tab close action");
+
+  paneVisible = false;
+  tree = toggle.render();
+  if (typeof tree.type === "function") tree = tree.type(tree.props);
+  assert.equal(tree.props["aria-label"], "Show Kindle Reader");
+  tree.props.onClick();
+  assert.deepEqual(paneCalls, [
+    { action: "undismiss", id: "kindle-reader:pane" },
+    { action: "reveal", id: "kindle-reader:pane" },
+  ]);
+
+  const savedVisibility = host.paneVisibility;
+  delete host.paneVisibility;
+  tree = toggle.render();
+  if (typeof tree.type === "function") tree = tree.type(tree.props);
+  assert.equal(tree, null, "older Desktop builds must omit the unsupported toggle without throwing");
+  host.paneVisibility = savedVisibility;
+}
+
 async function remoteStopPropagation() {
   const server = { generation: 0, stopped: false, items: [item1] };
   let pendingSwitch = { target_book_id: "kindle:B002" };
@@ -407,6 +459,7 @@ try {
   else if (scenario === "stopped-resume-response") await stoppedResumeResponseDoesNotPlay();
   else if (scenario === "stop-no-session") await stopWithoutFocusedSession();
   else if (scenario === "remote-stop") await remoteStopPropagation();
+  else if (scenario === "pane-toggle") await paneToggle();
   else throw new Error(`unknown scenario: ${scenario}`);
   console.log(`ok: ${scenario}`);
 } finally {

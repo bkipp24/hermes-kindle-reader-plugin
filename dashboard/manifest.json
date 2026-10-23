@@ -3,7 +3,7 @@
   "label": "Kindle Reader",
   "description": "Remote audio queue API for the Kindle Reader desktop pane",
   "icon": "BookOpen",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "slots": [],
   "entry": "dist/index.js",
   "api": "plugin_api.py"

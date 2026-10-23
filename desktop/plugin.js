@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { ConfirmDialog, host, useValue } from "@hermes/plugin-sdk";
 
 const ID = "kindle-reader";
+const PANE_ID = `${ID}:pane`;
 const MIN_BUFFER_SECONDS = 120;
 const POLL_MS = 5000;
 
@@ -12,6 +13,40 @@ const fmt = value => {
 };
 const dataUrl = base64 => `data:audio/mpeg;base64,${base64}`;
 const errorText = error => error instanceof Error ? error.message : String(error);
+
+function dismissReaderPane() {
+  const tab = globalThis.document?.querySelector?.(`[data-tree-tab="${PANE_ID}"]`);
+  if (!tab) return false;
+  const close = tab.querySelector?.('button[aria-label^="Close"]') || tab.querySelector?.("button");
+  if (close) {
+    close.click();
+    return true;
+  }
+  if (typeof globalThis.MouseEvent === "function" && typeof tab.dispatchEvent === "function") {
+    tab.dispatchEvent(new globalThis.MouseEvent("click", { bubbles: true, cancelable: true, button: 0, metaKey: true }));
+    return true;
+  }
+  return false;
+}
+
+function ReaderPaneToggle() {
+  if (typeof host.paneVisibility !== "function" || typeof host.undismissPane !== "function" || typeof host.revealPane !== "function") return null;
+  const visible = useValue(host.paneVisibility(PANE_ID));
+  const label = visible ? "Hide Kindle Reader" : "Show Kindle Reader";
+  return jsx("button", {
+    type: "button",
+    title: label,
+    "aria-label": label,
+    className: "inline-flex h-full items-center gap-1.5 px-2 text-[0.6875rem] text-(--ui-text-secondary) hover:bg-(--ui-hover) hover:text-foreground [-webkit-app-region:no-drag]",
+    onClick: () => {
+      if (visible && dismissReaderPane()) return;
+      host.undismissPane(PANE_ID);
+      host.revealPane(PANE_ID);
+    },
+    children: `▤ ${visible ? "Hide reader" : "Kindle reader"}`,
+  });
+}
+
 function ReaderPane({ ctx }) {
   const audioRef = useRef(null);
   const cacheRef = useRef(new Map());
@@ -560,6 +595,9 @@ export default {
   name: "Kindle Reader",
   defaultEnabled: true,
   register(ctx) {
-    ctx.register({ id: "pane", area: "panes", order: 120, title: "Kindle Reader", data: { placement: "bottom", dock: { pane: "workspace", pos: "bottom" }, height: "230px" }, render: () => jsx(ReaderPane, { ctx }) });
+    // A main-placement pane keeps Hermes' native tab strip/close affordance even
+    // when it is the only pane in its zone; the dock hint still places it below chat.
+    ctx.register({ id: "pane", area: "panes", order: 120, title: "Kindle Reader", data: { placement: "main", dock: { pane: "workspace", pos: "bottom" }, height: "230px", lifecycleKeepAlive: true }, render: () => jsx(ReaderPane, { ctx }) });
+    ctx.register({ id: "toggle", area: "statusBar.right", order: 60, render: () => jsx(ReaderPaneToggle, {}) });
   },
 };

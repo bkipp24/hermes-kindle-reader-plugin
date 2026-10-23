@@ -41,6 +41,10 @@ def test_remote_stop_pauses_audio_fences_continuation_and_clears_switch():
     run_behavior("remote-stop")
 
 
+def test_statusbar_toggle_hides_and_restores_keep_alive_reader_pane():
+    run_behavior("pane-toggle")
+
+
 def test_stopped_resume_response_does_not_start_playback_behaviorally():
     run_behavior("stopped-resume-response")
 
